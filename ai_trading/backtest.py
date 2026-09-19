@@ -150,13 +150,13 @@ def run_backtest(test_predictions: pd.DataFrame, config: BacktestConfig) -> Back
                 exit_fill = open_price * (1 - _slippage_rate(config))
                 close_position(exit_fill, timestamp, "target_gap")
             elif low_price <= stop_loss and high_price >= take_profit:
-                exit_fill = stop_loss * (1 - _slippage_rate(config))
+                exit_fill = stop_loss
                 close_position(exit_fill, timestamp, "stop_first_same_bar")
             elif low_price <= stop_loss:
-                exit_fill = stop_loss * (1 - _slippage_rate(config))
+                exit_fill = stop_loss
                 close_position(exit_fill, timestamp, "stop")
             elif high_price >= take_profit:
-                exit_fill = take_profit * (1 - _slippage_rate(config))
+                exit_fill = take_profit
                 close_position(exit_fill, timestamp, "target")
             else:
                 holding_bars += 1
@@ -180,6 +180,8 @@ def run_backtest(test_predictions: pd.DataFrame, config: BacktestConfig) -> Back
                     "signal_time": timestamp,
                     "atr": float(row["atr_14"]),
                 }
+            elif quantity == 0:
+                pending_entry = None
             elif action == "SELL" and quantity > 0:
                 pending_exit = {"execute_at": next_timestamp, "reason": "signal"}
 

@@ -31,8 +31,11 @@ def _payload(timestamp: str) -> dict[str, object]:
 
 def test_recommendation_save_is_idempotent(tmp_path) -> None:
     store = JournalStore(tmp_path / "journal.db")
-    first_id = store.save_recommendation(_payload("2024-01-01T00:00:00+00:00"))
-    second_id = store.save_recommendation(_payload("2024-01-01T00:00:00+00:00"))
+    first = _payload("2024-01-01T00:00:00+00:00")
+    second = _payload("2024-01-01T00:00:00+00:00")
+    second["created_timestamp"] = "2024-01-02T00:00:00+00:00"
+    first_id = store.save_recommendation(first)
+    second_id = store.save_recommendation(second)
     assert first_id == second_id
     recommendations = store.list_recommendations()
     assert len(recommendations) == 1
@@ -51,7 +54,7 @@ def test_pending_then_resolved_outcome_refresh(tmp_path) -> None:
             "volume": [1, 1],
         }
     )
-    assert store.evaluate_matured_recommendations(partial, neutral_threshold=0.01, evaluated_timestamp=pd.Timestamp("2024-01-03", tz="UTC")) == 0
+    assert store.evaluate_matured_recommendations(partial, symbol="TEST", source="fixture", interval="1d", evaluated_timestamp=pd.Timestamp("2024-01-03", tz="UTC")) == 0
     full = pd.DataFrame(
         {
             "timestamp": pd.date_range("2024-01-01", periods=4, freq="D", tz="UTC"),
@@ -62,10 +65,26 @@ def test_pending_then_resolved_outcome_refresh(tmp_path) -> None:
             "volume": [1, 1, 1, 1],
         }
     )
-    assert store.evaluate_matured_recommendations(full, neutral_threshold=0.01, evaluated_timestamp=pd.Timestamp("2024-01-04", tz="UTC")) == 1
+    assert store.evaluate_matured_recommendations(full, symbol="TEST", source="fixture", interval="1d", evaluated_timestamp=pd.Timestamp("2024-01-04", tz="UTC")) == 1
     resolved = store.list_recommendations().iloc[0]
     assert resolved["status"] == "resolved"
     assert resolved["observed_label"] == "UP"
+
+
+def test_timezone_aware_saved_timestamp_resolves(tmp_path) -> None:
+    store = JournalStore(tmp_path / "journal.db")
+    store.save_recommendation(_payload("2024-01-01T00:00:00+00:00"))
+    full = pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2024-01-01", periods=4, freq="D", tz="UTC"),
+            "open": [100, 101, 103, 104],
+            "high": [101, 102, 104, 105],
+            "low": [99, 100, 102, 103],
+            "close": [100, 101, 104, 105],
+            "volume": [1, 1, 1, 1],
+        }
+    )
+    assert store.evaluate_matured_recommendations(full, symbol="TEST", source="fixture", interval="1d", evaluated_timestamp=pd.Timestamp("2024-01-04", tz="UTC")) == 1
 
 
 def test_safe_csv_export_escapes_formula_cells() -> None:

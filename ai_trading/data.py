@@ -180,6 +180,8 @@ def download_yfinance_data(symbol: str, start: str, end: str, interval: str = "1
     if frame.empty:
         raise DataSourceError("No rows were returned for that ticker/date range.")
 
+    if isinstance(frame.columns, pd.MultiIndex):
+        frame.columns = [column[0] if isinstance(column, tuple) else column for column in frame.columns]
     frame = frame.reset_index()
     if "Date" in frame.columns:
         frame = frame.rename(columns={"Date": "timestamp"})

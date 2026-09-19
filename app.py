@@ -182,19 +182,28 @@ def main() -> None:
         if artifacts is None:
             st.info("Train the model first to run the honest held-out backtest.")
             return
+        backtest_config = BacktestConfig(
+            allocation=float(allocation),
+            commission_bps=10.0,
+            slippage_bps=5.0,
+            stop_atr=artifacts.config.stop_atr,
+            target_atr=artifacts.config.target_atr,
+            max_holding_bars=artifacts.config.horizon,
+            entry_threshold=artifacts.selected_entry_threshold,
+        )
         backtest = run_backtest(
             artifacts.test_predictions,
-            BacktestConfig(
-                allocation=float(allocation),
-                commission_bps=10.0,
-                slippage_bps=5.0,
-                stop_atr=artifacts.config.stop_atr,
-                target_atr=artifacts.config.target_atr,
-                max_holding_bars=artifacts.config.horizon,
-                entry_threshold=artifacts.selected_entry_threshold,
-            ),
+            backtest_config,
         )
-        st.plotly_chart(price_figure(artifacts.test_predictions, "Held-out test window with signals", artifacts.test_predictions), use_container_width=True)
+        st.plotly_chart(
+            price_figure(
+                artifacts.test_predictions,
+                "Held-out test window with executed fills",
+                trade_frame=backtest.trades if not backtest.trades.empty else None,
+                signal_frame=artifacts.test_predictions,
+            ),
+            use_container_width=True,
+        )
         metric_cols = st.columns(4)
         metric_cols[0].metric("Net return", f"{backtest.summary['net_total_return']:.2%}")
         metric_cols[1].metric("Max drawdown", f"{backtest.summary['max_drawdown']:.2%}")
@@ -209,7 +218,7 @@ def main() -> None:
             run_id = store.save_backtest_run(
                 symbol=artifacts.market_data.symbol,
                 summary=backtest.summary,
-                configuration={**asdict(artifacts.config), "entry_threshold": artifacts.selected_entry_threshold},
+                configuration=asdict(backtest_config),
                 trades=backtest.trades,
             )
             st.success(f"Saved backtest run {run_id}.")
@@ -222,7 +231,9 @@ def main() -> None:
             else:
                 count = store.evaluate_matured_recommendations(
                     market_data.frame,
-                    neutral_threshold=artifacts.config.neutral_threshold if artifacts else 0.01,
+                    symbol=market_data.symbol,
+                    source=market_data.source,
+                    interval=market_data.interval,
                     evaluated_timestamp=pd.Timestamp.utcnow(),
                 )
                 st.success(f"Resolved {count} matured recommendations.")

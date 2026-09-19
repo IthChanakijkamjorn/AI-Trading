@@ -9,7 +9,13 @@ from pathlib import Path
 import pandas as pd
 
 from ai_trading.constants import CSV_EXPORT_PREFIXES, DEFAULT_DB_PATH
-from ai_trading.labels import LABEL_DOWN, LABEL_HOLD, LABEL_UP
+
+
+def _to_utc_timestamp(value: object) -> pd.Timestamp:
+    timestamp = pd.Timestamp(value)
+    if timestamp.tzinfo is None:
+        return timestamp.tz_localize("UTC")
+    return timestamp.tz_convert("UTC")
 
 
 class JournalStore:
@@ -91,7 +97,8 @@ class JournalStore:
             )
 
     def save_recommendation(self, payload: dict[str, object]) -> int:
-        serializable = json.dumps(payload, sort_keys=True, default=str)
+        key_payload = {key: value for key, value in payload.items() if key != "created_timestamp"}
+        serializable = json.dumps(key_payload, sort_keys=True, default=str)
         recommendation_key = hashlib.sha256(serializable.encode("utf-8")).hexdigest()
         values = {
             "recommendation_key": recommendation_key,
@@ -146,12 +153,15 @@ class JournalStore:
         self,
         market_frame: pd.DataFrame,
         *,
-        neutral_threshold: float,
+        symbol: str,
+        source: str,
+        interval: str | None = None,
+        default_neutral_threshold: float = 0.01,
         evaluated_timestamp: pd.Timestamp,
     ) -> int:
         market = market_frame.copy().reset_index(drop=True)
         market["timestamp"] = pd.to_datetime(market["timestamp"], utc=True)
-        timestamp_to_index = {timestamp.isoformat(): idx for idx, timestamp in enumerate(market["timestamp"])}
+        timestamp_to_index = {_to_utc_timestamp(timestamp): idx for idx, timestamp in enumerate(market["timestamp"])}
         inserted = 0
         with self._connect() as connection:
             recommendations = connection.execute(
@@ -159,17 +169,23 @@ class JournalStore:
                 SELECT r.* FROM recommendations r
                 LEFT JOIN recommendation_outcomes o ON o.recommendation_id = r.id
                 WHERE o.recommendation_id IS NULL
+                  AND r.symbol = ?
+                  AND r.source = ?
+                  AND (? IS NULL OR r.interval = ?)
                 ORDER BY r.as_of_timestamp ASC
-                """
+                """,
+                (symbol, source, interval, interval),
             ).fetchall()
             for recommendation in recommendations:
-                as_of = pd.Timestamp(recommendation["as_of_timestamp"])
-                idx = timestamp_to_index.get(as_of.isoformat())
+                as_of = _to_utc_timestamp(recommendation["as_of_timestamp"])
+                idx = timestamp_to_index.get(as_of)
                 if idx is None:
                     continue
                 target_idx = idx + int(recommendation["horizon"])
                 if target_idx >= len(market):
                     continue
+                configuration = json.loads(recommendation["configuration_json"])
+                neutral_threshold = float(configuration.get("neutral_threshold", default_neutral_threshold))
                 observed_close = float(market.iloc[target_idx]["close"])
                 reference_price = float(recommendation["reference_price"])
                 realized_return = (observed_close / reference_price) - 1

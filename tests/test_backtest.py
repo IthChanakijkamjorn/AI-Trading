@@ -56,3 +56,21 @@ def test_backtest_gap_stop_and_zero_trade_case() -> None:
     zero_result = run_backtest(hold_frame, BacktestConfig(entry_threshold=0.45, allocation=0.5, commission_bps=0, slippage_bps=0))
     assert zero_result.summary["closed_trades"] == 0
     assert zero_result.summary["win_rate"] is None
+
+
+def test_flat_non_buy_bars_do_not_create_stale_entries() -> None:
+    frame = _prediction_frame()
+    frame[["prob_up", "prob_down"]] = 0.1
+    frame["prob_neutral"] = 0.8
+    frame["prediction"] = LABEL_HOLD
+    result = run_backtest(frame, BacktestConfig(entry_threshold=0.45, allocation=0.5, commission_bps=0, slippage_bps=0))
+    assert result.trades.empty
+
+
+def test_time_limit_exit_occurs_on_next_open() -> None:
+    frame = _prediction_frame()
+    frame.loc[3, ["prob_down", "prob_neutral", "prob_up", "prediction"]] = [0.2, 0.7, 0.1, LABEL_HOLD]
+    result = run_backtest(frame, BacktestConfig(entry_threshold=0.45, max_holding_bars=1, allocation=0.5, commission_bps=0, slippage_bps=0, stop_atr=5.0, target_atr=5.0))
+    trade = result.trades.iloc[0]
+    assert trade["exit_reason"] == "time_limit"
+    assert str(trade["exit_time"]) == "2024-01-04 00:00:00+00:00"
