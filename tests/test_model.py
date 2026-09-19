@@ -3,9 +3,9 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
+from ai_trading.data import normalize_ohlcv
 from ai_trading.features import FEATURE_COLUMNS
-from ai_trading.labels import LABEL_HOLD
-from ai_trading.model import InsufficientClassCoverage, ResearchConfig, run_research_pipeline
+from ai_trading.model import InsufficientClassCoverage, ResearchConfig, _choose_entry_threshold, run_research_pipeline
 
 
 def test_pipeline_generates_held_out_predictions(market_data) -> None:
@@ -23,7 +23,7 @@ def test_pipeline_rejects_insufficient_class_coverage(synthetic_frame) -> None:
     flat["open"] = 100.0
     flat["high"] = 100.0
     flat["low"] = 100.0
-    market_data = market_data = __import__("ai_trading.data", fromlist=["normalize_ohlcv"]).normalize_ohlcv(flat, symbol="FLAT", source="fixture")
+    market_data = normalize_ohlcv(flat, symbol="FLAT", source="fixture")
     with pytest.raises((InsufficientClassCoverage, ValueError)):
         run_research_pipeline(market_data, ResearchConfig(min_history=80, horizon=5, neutral_threshold=0.01))
 
@@ -33,3 +33,15 @@ def test_latest_signal_has_complete_feature_row(market_data) -> None:
     latest_row = artifacts.featured_frame.dropna(subset=FEATURE_COLUMNS).iloc[-1]
     assert latest_row[FEATURE_COLUMNS].notna().all()
     assert artifacts.latest_signal.forecast in {"DOWN", "NEUTRAL", "UP"}
+
+
+def test_threshold_selection_prefers_default_on_tie() -> None:
+    probabilities = pd.DataFrame(
+        {
+            "label": [1, -1, 0],
+            "prob_down": [0.41, 0.41, 0.10],
+            "prob_neutral": [0.49, 0.49, 0.80],
+            "prob_up": [0.41, 0.41, 0.10],
+        }
+    )
+    assert _choose_entry_threshold(probabilities, 0.45) == 0.45

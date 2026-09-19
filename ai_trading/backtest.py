@@ -65,6 +65,7 @@ def run_backtest(test_predictions: pd.DataFrame, config: BacktestConfig) -> Back
     take_profit = None
     holding_bars = 0
     costs_paid = 0.0
+    entry_commission_paid = 0.0
     pending_entry = None
     pending_exit = None
     trade_records: list[dict[str, object]] = []
@@ -72,12 +73,12 @@ def run_backtest(test_predictions: pd.DataFrame, config: BacktestConfig) -> Back
     bars_with_position = 0
 
     def close_position(price: float, timestamp: pd.Timestamp, reason: str) -> None:
-        nonlocal cash, quantity, entry_price, entry_time, signal_time, stop_loss, take_profit, holding_bars, costs_paid, pending_exit
+        nonlocal cash, quantity, entry_price, entry_time, signal_time, stop_loss, take_profit, holding_bars, costs_paid, pending_exit, entry_commission_paid
         if quantity <= 0:
             return
         commission = quantity * price * _commission_rate(config)
         proceeds = (quantity * price) - commission
-        pnl = proceeds - (quantity * entry_price)
+        pnl = proceeds - (quantity * entry_price) - entry_commission_paid
         cash += proceeds
         costs_paid += commission
         trade_records.append(
@@ -95,7 +96,7 @@ def run_backtest(test_predictions: pd.DataFrame, config: BacktestConfig) -> Back
                 "exit_reason": reason,
                 "stop_loss": stop_loss,
                 "take_profit": take_profit,
-                "total_costs": commission,
+                "total_costs": entry_commission_paid + commission,
             }
         )
         quantity = 0.0
@@ -105,6 +106,7 @@ def run_backtest(test_predictions: pd.DataFrame, config: BacktestConfig) -> Back
         stop_loss = None
         take_profit = None
         holding_bars = 0
+        entry_commission_paid = 0.0
         pending_exit = None
 
     for idx, row in frame.iterrows():
@@ -130,6 +132,7 @@ def run_backtest(test_predictions: pd.DataFrame, config: BacktestConfig) -> Back
                 total_cost = (quantity * entry_fill) + commission
             cash -= total_cost
             costs_paid += commission
+            entry_commission_paid = commission
             entry_price = entry_fill
             entry_time = timestamp
             signal_time = pending_entry["signal_time"]
@@ -198,14 +201,16 @@ def run_backtest(test_predictions: pd.DataFrame, config: BacktestConfig) -> Back
     losses = trades.loc[trades["net_pnl"] <= 0, "net_pnl"] if not trades.empty else pd.Series(dtype=float)
     gross_profit = float(wins.sum()) if not wins.empty else 0.0
     gross_loss = float(losses.abs().sum()) if not losses.empty else 0.0
-    benchmark = (frame["close"].iloc[-1] / frame["open"].iloc[0]) - 1
-    benchmark -= (2 * _commission_rate(config)) + (2 * _slippage_rate(config))
+    benchmark = None
+    if len(frame) > 1:
+        benchmark = (frame["close"].iloc[-1] / frame["open"].iloc[1]) - 1
+        benchmark -= (2 * _commission_rate(config)) + (2 * _slippage_rate(config))
 
     summary = {
         "starting_capital": config.starting_capital,
         "final_equity": final_equity,
         "net_total_return": total_return,
-        "buy_and_hold_return": float(benchmark),
+        "buy_and_hold_return": None if benchmark is None else float(benchmark),
         "max_drawdown": max_drawdown,
         "closed_trades": int(len(trades)),
         "win_rate": None if trades.empty else float((trades["net_pnl"] > 0).mean()),

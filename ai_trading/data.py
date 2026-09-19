@@ -64,7 +64,7 @@ def _gap_notes(timestamps: pd.Series) -> tuple[str, ...]:
     median_delta = deltas.median()
     if pd.isna(median_delta) or median_delta <= pd.Timedelta(0):
         return tuple()
-    gaps = deltas[deltas > median_delta * 1.5]
+    gaps = deltas[deltas > max(median_delta * 3, pd.Timedelta(days=4))]
     if gaps.empty:
         return tuple()
     return (f"Detected {len(gaps)} gaps larger than the median interval of {median_delta}.",)
@@ -92,6 +92,8 @@ def normalize_ohlcv(
     frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce")
     if frame["timestamp"].isna().any():
         raise DataValidationError("One or more timestamps could not be parsed.")
+    if not (frame["timestamp"].diff().dropna() > pd.Timedelta(0)).all():
+        raise DataValidationError("Timestamps must be strictly increasing and unique.")
 
     numeric_columns = ["open", "high", "low", "close", "volume"]
     for column in numeric_columns:
@@ -109,11 +111,7 @@ def normalize_ohlcv(
     if not ((frame["low"] <= frame[["open", "close", "high"]].min(axis=1)).all()):
         raise DataValidationError("Low must be less than or equal to open, high, and close.")
 
-    frame = frame.sort_values("timestamp").reset_index(drop=True)
-    if not frame["timestamp"].is_monotonic_increasing:
-        raise DataValidationError("Timestamps must be strictly increasing.")
-    if frame["timestamp"].duplicated().any():
-        raise DataValidationError("Timestamps must be unique.")
+    frame = frame.reset_index(drop=True)
 
     notes = list(_gap_notes(frame["timestamp"]))
     last_completed_candle = frame["timestamp"].iloc[-1]

@@ -8,7 +8,7 @@ import streamlit as st
 from ai_trading import __version__
 from ai_trading.backtest import BacktestConfig, run_backtest
 from ai_trading.data import DataSourceError, DataValidationError, download_yfinance_data, load_csv_bytes, load_sample_data
-from ai_trading.model import ResearchConfig, ResearchArtifacts, artifacts_to_jsonable, run_research_pipeline
+from ai_trading.model import InsufficientClassCoverage, ResearchConfig, ResearchArtifacts, artifacts_to_jsonable, run_research_pipeline
 from ai_trading.persistence import JournalStore, data_fingerprint, safe_csv_bytes
 from ai_trading.ui import equity_figure, price_figure
 
@@ -123,7 +123,7 @@ def main() -> None:
                     )
                     st.session_state["artifacts"] = artifacts
                     st.success("Model trained and evaluated on chronological held-out data.")
-                except Exception as exc:
+                except (DataValidationError, ValueError, InsufficientClassCoverage) as exc:
                     st.error(str(exc))
 
     market_data = st.session_state.get("market_data")
@@ -199,7 +199,7 @@ def main() -> None:
         metric_cols[0].metric("Net return", f"{backtest.summary['net_total_return']:.2%}")
         metric_cols[1].metric("Max drawdown", f"{backtest.summary['max_drawdown']:.2%}")
         metric_cols[2].metric("Win rate", "N/A" if backtest.summary["win_rate"] is None else f"{backtest.summary['win_rate']:.2%}")
-        metric_cols[3].metric("Buy & hold", f"{backtest.summary['buy_and_hold_return']:.2%}")
+        metric_cols[3].metric("Buy & hold", "N/A" if backtest.summary["buy_and_hold_return"] is None else f"{backtest.summary['buy_and_hold_return']:.2%}")
         st.caption("Signals come from chronologically held-out predictions. BUY opens a simulated long at the next bar open. SELL only closes an existing simulated long. Gap stops are handled conservatively, and stop is assumed first when stop and target both touch in the same bar.")
         st.plotly_chart(equity_figure(backtest.equity_curve), use_container_width=True)
         st.dataframe(backtest.trades)

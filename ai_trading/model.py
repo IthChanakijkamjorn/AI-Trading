@@ -188,7 +188,7 @@ def _choose_entry_threshold(probabilities: pd.DataFrame, default_threshold: floa
             zero_division=0,
         )
         score = float(precision + recall)
-        if score > best_score:
+        if (score > best_score + 1e-12) or (abs(score - best_score) <= 1e-12 and threshold == default_threshold):
             best_score = score
             best_threshold = threshold
     return best_threshold
@@ -310,7 +310,10 @@ def run_research_pipeline(market_data: MarketData, config: ResearchConfig) -> Re
     baseline_pred = _baseline_predictions(test_predictions, config.neutral_threshold)
     baseline_metrics = _metrics(test_predictions["label"].astype(int), baseline_pred.astype(int))
 
-    final_train = labeled_complete.copy()
+    inference_timestamp = pd.Timestamp(complete_rows["timestamp"].iloc[-1])
+    final_train = labeled_complete.loc[labeled_complete["timestamp"] < inference_timestamp].copy()
+    if final_train.empty:
+        raise ValueError("Not enough pre-inference labeled history remains for the latest signal.")
     final_pipeline = _build_pipeline(config.random_state)
     final_pipeline.fit(final_train[FEATURE_COLUMNS], final_train["label"].astype(int))
     latest_featured_frame = complete_rows.copy()
